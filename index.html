@@ -1,0 +1,1860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a0a0a">
+<title>Cramer Recomp</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useMemo } = React;
+
+// ======================== PROGRAM DATA (12-week phased structure) ========================
+// Anchor lifts (#1 each day) keep stable IDs across all phases — your PR + progression markers.
+// Other slots use phase-suffixed IDs so each variant tracks its own load history.
+// Phase 1 (wk 1-4): establish. Phase 2 (wk 5-8): push intensity. Phase 3 (wk 10-12): peak.
+// Week 9 is a programmed deload — same exercises as the surrounding phase, reduced volume.
+
+const PHASE_META = {
+  1: { name: "Phase 1 — Establish",  weeks: [1,2,3,4],    cal: "2,100 cal", focus: "Find working loads. Hit rep ranges with RPE 7-8 on top sets." },
+  2: { name: "Phase 2 — Push",       weeks: [5,6,7,8],    cal: "2,350 cal", focus: "Push loads. Target top of rep range on anchors. RPE 8-9 on top sets." },
+  3: { name: "Phase 3 — Peak",       weeks: [10,11,12],   cal: "Reassess",  focus: "Peak intensity on anchors. Prove PRs before Wk 12 reassessment." }
+};
+
+const DELOAD_WEEK = 9; // sandwiched between Phase 2 and Phase 3
+
+function programForPhase(phase) {
+  // Phase 1 and Phase 3 use the same exercise list (Phase 3 adds intensity tweaks via notes/tempo)
+  const isP2 = phase === 2;
+  const p3Tweak = phase === 3;
+
+  return {
+    monday: {
+      label: "MON · Upper (Chest & Shoulder Priority)",
+      short: "MON",
+      warmup: "upper",
+      exercises: [
+        // ANCHOR — stable ID across phases
+        { id: "mon1", name: "Incline DB Press", scheme: "RPT", sets: 3, reps: ["4-8","6-10","10-12"], rest: 180, note: "Pause briefly at chest; don't lock out hard at top — protect right shoulder.", category: "compound", progressInc: 5 },
+
+        // #2 PRESS — rotates
+        isP2
+          ? { id: "mon2_p2", name: "Low-Incline DB Press (15°)", scheme: "straight", sets: 2, reps: ["8-10","8-10"], rest: 150, note: "Lower incline = more sternal chest fibers. Shallower angle than Ex #1.", category: "compound", progressInc: 5 }
+          : { id: "mon2_p1", name: "DB Floor Press", scheme: "straight", sets: 2, reps: ["8-10","8-10"], rest: 150, note: "Limited ROM, shoulder-safe heavy press. Substitute for flat bench.", category: "compound", progressInc: 5 },
+
+        // #3a SHOULDER PRESS — rotates
+        isP2
+          ? { id: "mon3a_p2", name: "Arnold Press (neutral→pronated)", scheme: "superset", supersetWith: "mon3b_p2", sets: 2, reps: ["8-12","8-12"], rest: 90, note: "Start palms facing you, rotate to pronated as you press up. Full delt sweep.", category: "compound", progressInc: 5 }
+          : { id: "mon3a_p1", name: "Seated DB Shoulder Press", scheme: "superset", supersetWith: "mon3b_p1", sets: 2, reps: ["8-12","8-12"], rest: 90, note: "Neutral grip if right shoulder is talking that day.", category: "compound", progressInc: 5 },
+
+        // #3b ROW — rotates
+        isP2
+          ? { id: "mon3b_p2", name: "Meadows Row (landmine)", scheme: "superset", supersetWith: "mon3a_p2", sets: 2, reps: ["10-12/arm","10-12/arm"], rest: 90, note: "BB in landmine corner, staggered stance, row the sleeve. Lat-focused, kinder on shoulder.", category: "accessory", progressInc: 5 }
+          : { id: "mon3b_p1", name: "Chest-Supported DB Row", scheme: "superset", supersetWith: "mon3a_p1", sets: 2, reps: ["10-12","10-12"], rest: 90, note: "Chest down on incline bench. Superset with shoulder press.", category: "accessory", progressInc: 5 },
+
+        // #4a LATERAL — rotates, Phase 3 adds 1.5-rep tweak
+        isP2
+          ? { id: "mon4a_p2", name: "Lean-Away Lateral Raise (band or DB)", scheme: "superset", supersetWith: "mon4b_p2", sets: 2, reps: ["12-15","12-15"], rest: 60, note: "One hand on bench/upright, lean away from working arm. Greater stretch on side delt.", category: "isolation", progressInc: 2.5 }
+          : p3Tweak
+            ? { id: "mon4a_p3", name: "DB Lateral Raise — 1.5-rep", scheme: "superset", supersetWith: "mon4b_p3", sets: 2, reps: ["10-12","10-12"], rest: 60, note: "Each rep = full raise, lower halfway, raise to full, lower fully. 1 rep = 1.5 movements. Brutal pump.", category: "isolation", progressInc: 2.5 }
+            : { id: "mon4a_p1", name: "DB Lateral Raise", scheme: "superset", supersetWith: "mon4b_p1", sets: 2, reps: ["12-15","12-15"], rest: 60, note: "Shoulder width — weak point focus.", category: "isolation", progressInc: 2.5 },
+
+        // #4b REAR DELT — rotates
+        isP2
+          ? { id: "mon4b_p2", name: "Rear Delt Fly (chest-supported)", scheme: "superset", supersetWith: "mon4a_p2", sets: 2, reps: ["15-20","15-20"], rest: 60, note: "Lie chest-down on incline bench, fly DBs out wide. Pure rear delt isolation.", category: "isolation", progressInc: 2.5 }
+          : p3Tweak
+            ? { id: "mon4b_p3", name: "Band Face Pull", scheme: "superset", supersetWith: "mon4a_p3", sets: 2, reps: ["15-20","15-20"], rest: 60, note: "Posture + shoulder health.", category: "isolation", progressInc: 0 }
+            : { id: "mon4b_p1", name: "Band Face Pull / Rear Delt Fly", scheme: "superset", supersetWith: "mon4a_p1", sets: 2, reps: ["15-20","15-20"], rest: 60, note: "Posture + shoulder health.", category: "isolation", progressInc: 0 },
+
+        { id: "monC1", name: "Core: Dead Bug", scheme: "rest-fill", sets: 2, reps: ["8-10/side","8-10/side"], rest: 0, note: "Performed in Ex #1 rest periods. Low back pressed to floor.", category: "core", progressInc: 0 },
+        { id: "mon5", name: "Finisher (optional): BB Curl Burnout", scheme: "amrap", sets: 1, reps: ["max @ 40-50%"], rest: 0, note: "Only if time allows.", category: "finisher", progressInc: 0, optional: true },
+      ]
+    },
+    wednesday: {
+      label: "WED · Lower (Functional Emphasis)",
+      short: "WED",
+      warmup: "lower",
+      exercises: [
+        { id: "wed1", name: "Barbell Romanian Deadlift", scheme: "RPT", sets: 2, reps: ["6-8","8-10"], rest: 180, note: "Posterior chain anchor. Don't go below mid-shin — achilles-safe.", category: "compound", progressInc: 10 },
+
+        // #2 BSS — Phase 2 elevates front foot, Phase 1/3 standard
+        isP2
+          ? { id: "wed2_p2", name: "Bulgarian Split Squat (front-foot elevated)", scheme: "straight", sets: 3, reps: ["8-10/leg","8-10/leg","8-10/leg"], rest: 120, note: "2-3 inch plate under front foot. Deeper ROM, more quad/glute stretch.", category: "compound", progressInc: 5 }
+          : { id: "wed2_p1", name: "Bulgarian Split Squat (DB)", scheme: "straight", sets: 3, reps: ["8-10/leg","8-10/leg","8-10/leg"], rest: 120, note: "Unilateral, knee-friendly. 35s or adjustable DBs.", category: "compound", progressInc: 5 },
+
+        // #3 SQUAT — Phase 2 KB front, Phase 3 tempo
+        isP2
+          ? { id: "wed3_p2", name: "KB Front Squat (rack position)", scheme: "straight", sets: 2, reps: ["10-12","10-12"], rest: 90, note: "KB in rack (clean position). More upright torso = more quad emphasis.", category: "compound", progressInc: 5 }
+          : p3Tweak
+            ? { id: "wed3_p3", name: "Goblet Squat (3s eccentric)", scheme: "straight", sets: 2, reps: ["10-12","10-12"], rest: 90, note: "3-second descent. Time under tension. Heels flat — achilles-friendly.", category: "compound", progressInc: 5 }
+            : { id: "wed3_p1", name: "Goblet Squat or KB Front Squat", scheme: "straight", sets: 2, reps: ["10-12","10-12"], rest: 90, note: "45 lb KB. Heels flat — achilles-friendly.", category: "compound", progressInc: 5 },
+
+        // #4a HIP THRUST — rotates
+        isP2
+          ? { id: "wed4a_p2", name: "B-Stance Hip Thrust (DB)", scheme: "superset", supersetWith: "wed4b_p2", sets: 2, reps: ["10-12/leg","10-12/leg"], rest: 75, note: "Lead foot flat (working leg), trail foot on tiptoe for balance only. ~70% load through working leg.", category: "accessory", progressInc: 5 }
+          : { id: "wed4a_p1", name: "Single-Leg DB Hip Thrust", scheme: "superset", supersetWith: "wed4b_p1", sets: 2, reps: ["10-12/leg","10-12/leg"], rest: 75, note: "Off bench. Glute isolation.", category: "accessory", progressInc: 5 },
+
+        // #4b CALF — Phase 2 single-leg for greater stimulus
+        isP2
+          ? { id: "wed4b_p2", name: "Single-Leg Calf Raise (DB)", scheme: "superset", supersetWith: "wed4a_p2", sets: 2, reps: ["12-15/leg","12-15/leg"], rest: 75, note: "DB in same-side hand, other hand on wall for balance. Slow eccentric — achilles resilience.", category: "accessory", progressInc: 5 }
+          : { id: "wed4b_p1", name: "Standing Calf Raise (DB in hand)", scheme: "superset", supersetWith: "wed4a_p1", sets: 2, reps: ["12-15","12-15"], rest: 75, note: "Slow eccentric — achilles resilience (Alfredson logic).", category: "accessory", progressInc: 5 },
+
+        // #5 CARRY — Phase 2 suitcase
+        isP2
+          ? { id: "wed5_p2", name: "Suitcase Carry (heavy DB)", scheme: "time", sets: 2, reps: ["30-40 sec/side","30-40 sec/side"], rest: 60, note: "Heaviest DB one-sided. Stay tall, resist lateral lean. Anti-lateral-flexion + grip.", category: "carry", progressInc: 0 }
+          : { id: "wed5_p1", name: "Sandbag Bear Hug or Suitcase Carry", scheme: "time", sets: 2, reps: ["30-40 sec","30-40 sec"], rest: 60, note: "50 lb sandbag or heavy DB. Core + grip.", category: "carry", progressInc: 0 },
+
+        { id: "wedC1", name: "Core: Pallof Press (band)", scheme: "rest-fill", sets: 2, reps: ["10-12/side","10-12/side"], rest: 0, note: "In Ex #1 rest. Anti-rotation.", category: "core", progressInc: 0 },
+        { id: "wedC2", name: "Core: Side Plank", scheme: "rest-fill", sets: 2, reps: ["20-30s/side","20-30s/side"], rest: 0, note: "In Ex #2 rest. Anti-lateral flexion.", category: "core", progressInc: 0 },
+      ]
+    },
+    friday: {
+      label: "FRI · Upper (Back/Arm Priority + Chest/Shoulder Secondary)",
+      short: "FRI",
+      warmup: "upper",
+      exercises: [
+        { id: "fri1", name: "One-Arm DB Row", scheme: "RPT", sets: 3, reps: ["6-8/arm","8-10/arm","10-12/arm"], rest: 180, note: "Heaviest pull of the week. Use 80 lb adjustable DB.", category: "compound", progressInc: 5 },
+
+        // #2 PRESS — Phase 2 swap to push-up variant (BFR or weighted)
+        isP2
+          ? { id: "fri2_p2", name: "Weighted Push-up or BFR Push-up", scheme: "straight", sets: 2, reps: ["10-15","10-15"], rest: 120, note: "Plate on back OR BFR cuffs at 7/10. Closed-chain, shoulder-friendly chest hit.", category: "compound", progressInc: 5 }
+          : { id: "fri2_p1", name: "Incline DB Press (lighter)", scheme: "straight", sets: 2, reps: ["10-12","10-12"], rest: 120, note: "Second chest hit of week. Focus on stretch at bottom.", category: "compound", progressInc: 5 },
+
+        // #3a PRESS — Phase 2 Z-Press
+        isP2
+          ? { id: "fri3a_p2", name: "Z-Press (seated floor)", scheme: "superset", supersetWith: "fri3b_p2", sets: 2, reps: ["8-10","8-10"], rest: 90, note: "Seated on floor, legs straight. Forces vertical press with zero leg drive. Strict overhead.", category: "compound", progressInc: 5 }
+          : { id: "fri3a_p1", name: "Landmine Press (BB in corner)", scheme: "superset", supersetWith: "fri3b_p1", sets: 2, reps: ["8-10/arm","8-10/arm"], rest: 90, note: "Shoulder-friendly overhead. Press up and slightly across.", category: "compound", progressInc: 5 },
+
+        // #3b PULL — Phase 2 landmine row
+        isP2
+          ? { id: "fri3b_p2", name: "Chest-Supported T-Bar Row (landmine)", scheme: "superset", supersetWith: "fri3a_p2", sets: 2, reps: ["10-12","10-12"], rest: 90, note: "BB in landmine corner. Chest on bench, row sleeve with both hands. Mid-back focus.", category: "accessory", progressInc: 5 }
+          : { id: "fri3b_p1", name: "DB Pullover", scheme: "superset", supersetWith: "fri3a_p1", sets: 2, reps: ["10-12","10-12"], rest: 90, note: "Chest + lat stretch. Lie across bench.", category: "accessory", progressInc: 5 },
+
+        // #4a CURL — Phase 2 incline DB curl
+        isP2
+          ? { id: "fri4a_p2", name: "Incline DB Curl", scheme: "superset", supersetWith: "fri4b_p2", sets: 2, reps: ["10-12","10-12"], rest: 60, note: "Arms behind body on incline bench. Long-head biceps stretch — superior hypertrophy stimulus.", category: "isolation", progressInc: 2.5 }
+          : { id: "fri4a_p1", name: "Hammer Curl", scheme: "superset", supersetWith: "fri4b_p1", sets: 2, reps: ["10-12","10-12"], rest: 60, note: "Brachialis + forearm.", category: "isolation", progressInc: 2.5 },
+
+        // #4b TRI — Phase 2 OH extension
+        isP2
+          ? { id: "fri4b_p2", name: "Overhead DB Tri Extension", scheme: "superset", supersetWith: "fri4a_p2", sets: 2, reps: ["10-12","10-12"], rest: 60, note: "Two hands on one DB overhead. Deepest stretch on long head of triceps.", category: "isolation", progressInc: 2.5 }
+          : { id: "fri4b_p1", name: "DB Skull Crusher or OH Tri Ext", scheme: "superset", supersetWith: "fri4a_p1", sets: 2, reps: ["10-12","10-12"], rest: 60, note: "Stretched-position triceps work.", category: "isolation", progressInc: 2.5 },
+
+        { id: "friC1", name: "Core: Ab Wheel or Plank Reach-Out", scheme: "rest-fill", sets: 2, reps: ["6-10","6-10"], rest: 0, note: "In Ex #1 rest. Anti-extension under load.", category: "core", progressInc: 0 },
+        { id: "fri5", name: "Finisher (rotate): BB curl / lat raise drop / DB press AMRAP", scheme: "amrap", sets: 1, reps: ["1 set"], rest: 0, note: "Pick based on what got hit lightest.", category: "finisher", progressInc: 0, optional: true },
+      ]
+    }
+  };
+}
+
+// Deload week: take whichever phase you came from, drop volume.
+// Specifically: any exercise with 3 sets drops to 2, any with 2 sets drops to 1.
+// Top-set rep targets stay; intensity (load) target drops to RPE 6-7 (subjective in-app cue).
+function deloadProgram(basePhase) {
+  const base = programForPhase(basePhase);
+  const reduce = (ex) => {
+    const newSetCount = ex.sets === 3 ? 2 : (ex.sets === 2 ? 1 : ex.sets);
+    return {
+      ...ex,
+      id: ex.id + "_dl",
+      sets: newSetCount,
+      reps: ex.reps.slice(0, newSetCount),
+      note: "DELOAD — drop ~20% load, stop 2+ reps shy of failure (RPE 6-7). " + ex.note
+    };
+  };
+  return {
+    monday:    { ...base.monday,    label: base.monday.label + " (DELOAD)",    exercises: base.monday.exercises.map(reduce) },
+    wednesday: { ...base.wednesday, label: base.wednesday.label + " (DELOAD)", exercises: base.wednesday.exercises.map(reduce) },
+    friday:    { ...base.friday,    label: base.friday.label + " (DELOAD)",    exercises: base.friday.exercises.map(reduce) },
+  };
+}
+
+function getProgramForWeek(week) {
+  if (week === DELOAD_WEEK) return { program: deloadProgram(2), phase: "deload" };
+  if (week >= 1 && week <= 4) return { program: programForPhase(1), phase: 1 };
+  if (week >= 5 && week <= 8) return { program: programForPhase(2), phase: 2 };
+  if (week >= 10 && week <= 12) return { program: programForPhase(3), phase: 3 };
+  // weeks outside 1-12: default to Phase 1
+  return { program: programForPhase(1), phase: 1 };
+}
+
+// Build a flat lookup of every exercise across all phases so history can resolve any ID.
+const ALL_EXERCISES = (() => {
+  const all = {};
+  [1, 2, 3].forEach(p => {
+    const prog = programForPhase(p);
+    Object.values(prog).forEach(day => {
+      day.exercises.forEach(ex => { all[ex.id] = ex; });
+    });
+    // deload versions
+    const dl = deloadProgram(p);
+    Object.values(dl).forEach(day => {
+      day.exercises.forEach(ex => { all[ex.id] = ex; });
+    });
+  });
+  return all;
+})();
+
+const WARMUPS = {
+  upper: {
+    title: "Upper Day Warm-Up (5 min)",
+    blocks: [
+      { name: "Raise (1 min)", items: ["Arm circles fwd/back + light jumping jacks — 30s each"] },
+      { name: "Mobilize (1.5 min)", items: ["Band pull-apart — 15 reps", "Wall slide W→Y — 10 reps", "Thoracic ext over foam roller/bench — 30s"] },
+      { name: "Activate (1.5 min)", items: ["Band external rotation — 12/arm", "Scapular push-up — 10 reps"] },
+      { name: "Potentiate (1 min)", items: ["Empty BB or light DB press — 1×10-12", "1×5 at 50% working weight"] }
+    ],
+    critical: "Rotator cuff activation (band ERs) is the most important piece given right shoulder history. Don't skip it."
+  },
+  lower: {
+    title: "Lower Day Warm-Up (5 min)",
+    blocks: [
+      { name: "Raise (1 min)", items: ["March in place + leg swings (front/back, side/side) — 30s each"] },
+      { name: "Mobilize (1.5 min)", items: ["World's greatest stretch — 3/side", "90/90 hip switches — 5/side", "Ankle circles + pumps — 10 each direction"] },
+      { name: "Activate (1.5 min)", items: ["Glute bridge — 12 reps", "Banded clamshell or lateral band walk — 10/side", "Bodyweight calf raise, slow eccentric — 10 reps"] },
+      { name: "Potentiate (1 min)", items: ["Empty BB or goblet squat — 1×10", "1×5 at light load"] }
+    ],
+    critical: "Slow-eccentric calf raise borrows from the Alfredson protocol — eccentric calf loading is protective even past acute injury."
+  }
+};
+
+// ======================== STORAGE LAYER (localStorage — works in any browser) ========================
+const KEYS = {
+  workouts: "cramer:workouts:v1",
+  bodyweight: "cramer:bodyweight:v1",
+  prs: "cramer:prs:v1",
+  settings: "cramer:settings:v1"
+};
+
+async function loadKey(key, fallback) {
+  try {
+    const r = localStorage.getItem(key);
+    return r ? JSON.parse(r) : fallback;
+  } catch { return fallback; }
+}
+async function saveKey(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch(e) { console.error(e); }
+}
+
+// ======================== HELPERS ========================
+const todayISO = () => new Date().toISOString().slice(0,10);
+const fmtDate = (iso) => {
+  const d = new Date(iso + "T12:00:00");
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", weekday: "short" });
+};
+const fmtTime = (sec) => {
+  const m = Math.floor(sec/60), s = sec%60;
+  return `${m}:${String(s).padStart(2,"0")}`;
+};
+function suggestedDay() {
+  // Mon=1, Wed=3, Fri=5; otherwise nearest upcoming
+  const d = new Date().getDay();
+  if (d === 1) return "monday";
+  if (d === 3) return "wednesday";
+  if (d === 5) return "friday";
+  if (d === 0 || d === 6) return "monday"; // weekend → next lift = Monday
+  if (d === 2) return "wednesday";
+  return "friday";
+}
+function topRepHit(repRange, repsLogged) {
+  // repRange e.g. "4-8" or "8-10/leg" or "10-12"
+  const m = String(repRange).match(/(\d+)\s*-\s*(\d+)/);
+  if (!m) return false;
+  return repsLogged >= parseInt(m[2]);
+}
+
+// ======================== TIMER (global, persists across views) ========================
+function useRestTimer() {
+  const [remaining, setRemaining] = useState(0);
+  const [active, setActive] = useState(false);
+  const endRef = useRef(null);
+  const audioRef = useRef(null);
+
+  useEffect(() => {
+    let raf;
+    const tick = () => {
+      if (endRef.current) {
+        const left = Math.max(0, Math.ceil((endRef.current - Date.now())/1000));
+        setRemaining(left);
+        if (left === 0) {
+          setActive(false);
+          endRef.current = null;
+          beep();
+          if (navigator.vibrate) navigator.vibrate([200,100,200]);
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  const beep = () => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const o = ctx.createOscillator(); const g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.frequency.value = 880; o.type = "sine";
+      g.gain.setValueAtTime(0.3, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+      o.start(); o.stop(ctx.currentTime + 0.5);
+    } catch(e) {}
+  };
+
+  const start = (sec) => {
+    endRef.current = Date.now() + sec*1000;
+    setRemaining(sec);
+    setActive(true);
+  };
+  const stop = () => { endRef.current = null; setActive(false); setRemaining(0); };
+  const add = (sec) => {
+    if (endRef.current) endRef.current += sec*1000;
+    else { endRef.current = Date.now() + sec*1000; setActive(true); }
+  };
+
+  return { remaining, active, start, stop, add };
+}
+
+// ======================== APP ROOT ========================
+function App() {
+  const [view, setView] = useState("home"); // home | session | history | body | warmup | program
+  const [activeSession, setActiveSession] = useState(null);
+  const [workouts, setWorkouts] = useState({});
+  const [bodyweight, setBodyweight] = useState([]);
+  const [prs, setPrs] = useState({});
+  const [loaded, setLoaded] = useState(false);
+  const [warmupKey, setWarmupKey] = useState(null);
+  const [exerciseIdx, setExerciseIdx] = useState(0);
+  const [currentWeek, setCurrentWeek] = useState(1);
+
+  const timer = useRestTimer();
+
+  // Derived program for the current week
+  const { program: PROGRAM, phase: currentPhase } = useMemo(() => getProgramForWeek(currentWeek), [currentWeek]);
+
+  useEffect(() => {
+    (async () => {
+      const [w, b, p, settings] = await Promise.all([
+        loadKey(KEYS.workouts, {}),
+        loadKey(KEYS.bodyweight, []),
+        loadKey(KEYS.prs, {}),
+        loadKey(KEYS.settings, { currentWeek: 1 })
+      ]);
+      setWorkouts(w); setBodyweight(b); setPrs(p);
+      setCurrentWeek(settings.currentWeek || 1);
+      // resume in-progress?
+      const inProgress = Object.values(w).find(s => !s.completed);
+      if (inProgress) setActiveSession(inProgress);
+      setLoaded(true);
+    })();
+  }, []);
+
+  const persistWeek = async (week) => {
+    setCurrentWeek(week);
+    const settings = await loadKey(KEYS.settings, {});
+    await saveKey(KEYS.settings, { ...settings, currentWeek: week });
+  };
+
+  const persistWorkouts = async (next) => {
+    setWorkouts(next);
+    await saveKey(KEYS.workouts, next);
+  };
+  const persistBW = async (next) => {
+    setBodyweight(next);
+    await saveKey(KEYS.bodyweight, next);
+  };
+  const persistPRs = async (next) => {
+    setPrs(next);
+    await saveKey(KEYS.prs, next);
+  };
+
+  // ----- Export / Import -----
+  const exportData = () => {
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      app: "cramer-recomp",
+      data: { workouts, bodyweight, prs }
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    a.href = url;
+    a.download = `cramer-recomp-backup_${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const importData = (file, mode) => {
+    // mode: "replace" wipes existing; "merge" keeps existing and adds non-conflicting
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const parsed = JSON.parse(e.target.result);
+          if (!parsed.data || parsed.app !== "cramer-recomp") {
+            reject(new Error("Not a valid Cramer Recomp backup file."));
+            return;
+          }
+          const incoming = parsed.data;
+          let nextWorkouts, nextBW, nextPRs;
+
+          if (mode === "replace") {
+            nextWorkouts = incoming.workouts || {};
+            nextBW = incoming.bodyweight || [];
+            nextPRs = incoming.prs || {};
+          } else {
+            // merge: incoming wins on key conflicts for workouts/prs;
+            // bodyweight dedupes by date (incoming wins)
+            nextWorkouts = { ...workouts, ...(incoming.workouts || {}) };
+            const bwMap = {};
+            [...bodyweight, ...(incoming.bodyweight || [])].forEach(b => { bwMap[b.date] = b; });
+            nextBW = Object.values(bwMap).sort((a,b) => a.date.localeCompare(b.date));
+            nextPRs = { ...prs };
+            Object.entries(incoming.prs || {}).forEach(([id, pr]) => {
+              const cur = nextPRs[id];
+              const incE1 = pr.weight * (1 + pr.reps/30);
+              const curE1 = cur ? cur.weight * (1 + cur.reps/30) : 0;
+              if (!cur || incE1 > curE1) nextPRs[id] = pr;
+            });
+          }
+
+          await persistWorkouts(nextWorkouts);
+          await persistBW(nextBW);
+          await persistPRs(nextPRs);
+          // resume any in-progress from import
+          const inProgress = Object.values(nextWorkouts).find(s => !s.completed);
+          setActiveSession(inProgress || null);
+          resolve({
+            workouts: Object.keys(nextWorkouts).length,
+            bodyweight: nextBW.length,
+            prs: Object.keys(nextPRs).length
+          });
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = () => reject(new Error("Failed to read file."));
+      reader.readAsText(file);
+    });
+  };
+
+  // ----- Session lifecycle -----
+  const startSession = (dayKey) => {
+    const id = `s_${Date.now()}`;
+    const day = PROGRAM[dayKey];
+    // Pre-populate sets with last weights used for that EXACT exercise ID
+    // (since rotating slots have phase-specific IDs, this naturally only matches
+    // the same variant — for anchor lifts like mon1, it matches across all phases)
+    const lastByEx = {};
+    Object.values(workouts).filter(s=>s.completed).sort((a,b)=>b.startedAt-a.startedAt).forEach(s=>{
+      s.exercises.forEach(ex => {
+        if (!lastByEx[ex.id]) lastByEx[ex.id] = ex.sets;
+      });
+    });
+    const session = {
+      id,
+      dayKey,
+      week: currentWeek,
+      phase: currentPhase,
+      startedAt: Date.now(),
+      completed: false,
+      exercises: day.exercises.map(ex => ({
+        id: ex.id,
+        sets: ex.reps.map((rep, i) => {
+          const last = lastByEx[ex.id]?.[i];
+          return {
+            targetReps: rep,
+            weight: last?.weight ?? "",
+            reps: "",
+            rpe: "",
+            done: false
+          };
+        }),
+        note: ""
+      }))
+    };
+    const next = { ...workouts, [id]: session };
+    persistWorkouts(next);
+    setActiveSession(session);
+    setExerciseIdx(0);
+    setView("session");
+  };
+
+  const updateSession = (updater) => {
+    if (!activeSession) return;
+    const updated = updater(activeSession);
+    setActiveSession(updated);
+    const next = { ...workouts, [updated.id]: updated };
+    persistWorkouts(next);
+  };
+
+  const completeSession = () => {
+    if (!activeSession) return;
+    const finished = { ...activeSession, completed: true, finishedAt: Date.now() };
+    // Update PRs
+    const newPrs = { ...prs };
+    finished.exercises.forEach(ex => {
+      ex.sets.forEach(set => {
+        const w = parseFloat(set.weight);
+        const r = parseInt(set.reps);
+        if (!isNaN(w) && !isNaN(r) && set.done) {
+          const cur = newPrs[ex.id];
+          // 1RM Epley estimate for comparison
+          const e1 = w * (1 + r/30);
+          const curE1 = cur ? cur.weight * (1 + cur.reps/30) : 0;
+          if (!cur || e1 > curE1) {
+            newPrs[ex.id] = { weight: w, reps: r, date: todayISO() };
+          }
+        }
+      });
+    });
+    persistPRs(newPrs);
+    persistWorkouts({ ...workouts, [finished.id]: finished });
+    setActiveSession(null);
+    setView("home");
+  };
+
+  const abandonSession = () => {
+    if (!activeSession) return;
+    const next = { ...workouts };
+    delete next[activeSession.id];
+    persistWorkouts(next);
+    setActiveSession(null);
+    setView("home");
+  };
+
+  if (!loaded) return <div className="loading">Loading…</div>;
+
+  return (
+    <div className="app">
+      <TopBar view={view} setView={setView} hasActive={!!activeSession} />
+      {timer.active && <FloatingTimer timer={timer} />}
+
+      <main className="main">
+        {view === "home" && (
+          <Home
+            PROGRAM={PROGRAM}
+            currentWeek={currentWeek}
+            currentPhase={currentPhase}
+            workouts={workouts}
+            bodyweight={bodyweight}
+            prs={prs}
+            activeSession={activeSession}
+            startSession={startSession}
+            resumeSession={() => setView("session")}
+            setView={setView}
+            setWarmupKey={setWarmupKey}
+          />
+        )}
+        {view === "session" && activeSession && (
+          <Session
+            PROGRAM={PROGRAM}
+            session={activeSession}
+            updateSession={updateSession}
+            completeSession={completeSession}
+            abandonSession={abandonSession}
+            timer={timer}
+            prs={prs}
+            workouts={workouts}
+            exerciseIdx={exerciseIdx}
+            setExerciseIdx={setExerciseIdx}
+            setView={setView}
+            setWarmupKey={setWarmupKey}
+          />
+        )}
+        {view === "history" && (
+          <History workouts={workouts} prs={prs} setView={setView} />
+        )}
+        {view === "body" && (
+          <BodyTracker bodyweight={bodyweight} persistBW={persistBW} exportData={exportData} importData={importData} />
+        )}
+        {view === "warmup" && warmupKey && (
+          <WarmupView warmupKey={warmupKey} setView={setView} />
+        )}
+        {view === "program" && (
+          <ProgramView
+            currentWeek={currentWeek}
+            currentPhase={currentPhase}
+            persistWeek={persistWeek}
+          />
+        )}
+      </main>
+
+      <BottomNav view={view} setView={setView} />
+    </div>
+  );
+}
+
+// ======================== TOP BAR + NAV ========================
+function TopBar({ view, setView, hasActive }) {
+  const titles = {
+    home: "CRAMER · RECOMP",
+    session: "TRAIN",
+    history: "HISTORY",
+    body: "BODY",
+    warmup: "WARM-UP",
+    program: "PROGRAM"
+  };
+  return (
+    <header className="topbar">
+      <div className="brand">{titles[view] || "CRAMER · RECOMP"}</div>
+      {hasActive && view !== "session" && (
+        <button className="resume" onClick={() => setView("session")}>● ACTIVE</button>
+      )}
+    </header>
+  );
+}
+
+function BottomNav({ view, setView }) {
+  const items = [
+    { k: "home",    l: "Home",    i: "▤" },
+    { k: "program", l: "Program", i: "◫" },
+    { k: "history", l: "History", i: "≡" },
+    { k: "body",    l: "Body",    i: "⚖" },
+  ];
+  return (
+    <nav className="bottomnav four">
+      {items.map(it => (
+        <button key={it.k} className={view===it.k?"navbtn active":"navbtn"} onClick={() => setView(it.k)}>
+          <span className="icon">{it.i}</span>
+          <span className="label">{it.l}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+// ======================== HOME ========================
+function Home({ PROGRAM, currentWeek, currentPhase, workouts, bodyweight, prs, activeSession, startSession, resumeSession, setView, setWarmupKey }) {
+  const suggested = suggestedDay();
+  const completed = Object.values(workouts).filter(s=>s.completed).sort((a,b)=>b.startedAt-a.startedAt);
+  const recent = completed.slice(0,3);
+  const latestBW = bodyweight[bodyweight.length-1];
+  const startBW = bodyweight[0];
+
+  const last7 = useMemo(() => {
+    if (bodyweight.length === 0) return null;
+    const cutoff = Date.now() - 7*86400000;
+    const recent = bodyweight.filter(b => new Date(b.date+"T12:00:00").getTime() >= cutoff);
+    if (recent.length === 0) return null;
+    const avg = recent.reduce((s,b)=>s+b.weight,0)/recent.length;
+    return avg;
+  }, [bodyweight]);
+
+  const phaseLabel = currentPhase === "deload"
+    ? "DELOAD WEEK"
+    : `PHASE ${currentPhase}`;
+  const phaseSub = currentPhase === "deload"
+    ? "Reduce volume. RPE 6-7. Recover before final push."
+    : PHASE_META[currentPhase]?.focus || "";
+
+  return (
+    <div className="home">
+      <div className="week-banner" onClick={() => setView("program")}>
+        <div className="wb-left">
+          <div className="wb-week">WEEK {currentWeek} / 12</div>
+          <div className="wb-phase">{phaseLabel}</div>
+        </div>
+        <div className="wb-right">
+          <div className="wb-focus">{phaseSub}</div>
+          <div className="wb-cta">View program →</div>
+        </div>
+      </div>
+
+      {activeSession && (
+        <div className="card resume-card" onClick={resumeSession}>
+          <div className="resume-badge">IN PROGRESS</div>
+          <div className="resume-title">{PROGRAM[activeSession.dayKey].label}</div>
+          <div className="resume-sub">Started {new Date(activeSession.startedAt).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})} · Tap to resume →</div>
+        </div>
+      )}
+
+      <section className="section">
+        <div className="section-label">START TRAINING</div>
+        <div className="day-grid">
+          {["monday","wednesday","friday"].map(k => (
+            <button
+              key={k}
+              className={`day-card ${k===suggested?"highlight":""}`}
+              onClick={() => startSession(k)}
+              disabled={!!activeSession}
+            >
+              <div className="day-short">{PROGRAM[k].short}</div>
+              <div className="day-name">{PROGRAM[k].label.split("·")[1].trim()}</div>
+              {k===suggested && <div className="day-tag">SUGGESTED TODAY</div>}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="section">
+        <div className="section-label">QUICK ACCESS</div>
+        <div className="quick-grid">
+          <button className="quick" onClick={()=>{setWarmupKey("upper"); setView("warmup");}}>
+            <div className="quick-t">Upper warm-up</div>
+            <div className="quick-s">5 min · RAMP protocol</div>
+          </button>
+          <button className="quick" onClick={()=>{setWarmupKey("lower"); setView("warmup");}}>
+            <div className="quick-t">Lower warm-up</div>
+            <div className="quick-s">5 min · RAMP protocol</div>
+          </button>
+        </div>
+      </section>
+
+      <section className="section">
+        <div className="section-label">STATS</div>
+        <div className="stats-grid">
+          <div className="stat">
+            <div className="stat-num">{completed.length}</div>
+            <div className="stat-lbl">sessions logged</div>
+          </div>
+          <div className="stat">
+            <div className="stat-num">{latestBW ? latestBW.weight : "—"}<span className="unit"> lb</span></div>
+            <div className="stat-lbl">latest weight</div>
+          </div>
+          <div className="stat">
+            <div className="stat-num">{last7 ? last7.toFixed(1) : "—"}<span className="unit"> lb</span></div>
+            <div className="stat-lbl">7-day avg</div>
+          </div>
+          <div className="stat">
+            <div className="stat-num">{startBW && latestBW ? ((latestBW.weight - startBW.weight)>=0?"+":"") + (latestBW.weight - startBW.weight).toFixed(1) : "—"}<span className="unit"> lb</span></div>
+            <div className="stat-lbl">vs start</div>
+          </div>
+        </div>
+      </section>
+
+      {recent.length > 0 && (
+        <section className="section">
+          <div className="section-label">RECENT SESSIONS</div>
+          <div className="recent-list">
+            {recent.map(s => (
+              <div key={s.id} className="recent-row">
+                <div>
+                  <div className="recent-day">{s.dayKey === "monday" ? "MON" : s.dayKey === "wednesday" ? "WED" : "FRI"}</div>
+                  <div className="recent-date">{new Date(s.startedAt).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>
+                </div>
+                <div className="recent-meta">
+                  {Math.round((s.finishedAt - s.startedAt)/60000)} min · {s.exercises.reduce((n,e)=>n+e.sets.filter(x=>x.done).length,0)} sets
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="section">
+        <div className="section-label">PROGRAM TARGETS</div>
+        <div className="targets">
+          <div className="target-row"><span>Goal weight</span><span className="t-val">195–205 lb</span></div>
+          <div className="target-row"><span>Protein floor</span><span className="t-val">180 g/day</span></div>
+          <div className="target-row"><span>Phase 1 (wk 1–4)</span><span className="t-val">2,100 cal</span></div>
+          <div className="target-row"><span>Phase 2 (wk 5–8)</span><span className="t-val">2,350 cal</span></div>
+          <div className="target-row"><span>Step floor</span><span className="t-val">10,000/day</span></div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ======================== SESSION ========================
+function Session({ PROGRAM, session, updateSession, completeSession, abandonSession, timer, prs, workouts, exerciseIdx, setExerciseIdx, setView, setWarmupKey }) {
+  // Build the day view from the session's own exercise IDs — this makes the session
+  // self-contained, immune to mid-session week changes. The day label/warmup comes
+  // from PROGRAM (which is just a layout aid; labels are stable across phases).
+  const dayMeta = PROGRAM[session.dayKey] || { label: "", short: "", warmup: "upper" };
+  const day = {
+    ...dayMeta,
+    exercises: session.exercises.map(e => ALL_EXERCISES[e.id]).filter(Boolean)
+  };
+  const ex = day.exercises[exerciseIdx];
+  const exState = session.exercises[exerciseIdx];
+
+  // Previous session same exercise
+  const prevSame = useMemo(() => {
+    const prior = Object.values(workouts)
+      .filter(s => s.completed && s.dayKey === session.dayKey && s.id !== session.id)
+      .sort((a,b)=>b.startedAt - a.startedAt);
+    for (const s of prior) {
+      const found = s.exercises.find(e => e.id === ex.id);
+      if (found) return { date: s.startedAt, sets: found.sets };
+    }
+    return null;
+  }, [ex.id, workouts, session.id]);
+
+  const updateSet = (setIdx, field, value) => {
+    updateSession(s => {
+      const exs = [...s.exercises];
+      const setsArr = [...exs[exerciseIdx].sets];
+      setsArr[setIdx] = { ...setsArr[setIdx], [field]: value };
+      exs[exerciseIdx] = { ...exs[exerciseIdx], sets: setsArr };
+      return { ...s, exercises: exs };
+    });
+  };
+
+  const completeSet = (setIdx) => {
+    const set = exState.sets[setIdx];
+    if (!set.weight && !set.reps && ex.category !== "core" && ex.category !== "carry") return;
+    updateSet(setIdx, "done", true);
+    // RPT auto-prefill: drop ~10% for next set
+    if (ex.scheme === "RPT" && setIdx < ex.sets - 1) {
+      const next = exState.sets[setIdx+1];
+      if (!next.weight && set.weight) {
+        const w = parseFloat(set.weight);
+        if (!isNaN(w)) {
+          const dropped = Math.round(w * 0.9 / 2.5) * 2.5;
+          updateSet(setIdx+1, "weight", String(dropped));
+        }
+      }
+    }
+    // Start rest timer
+    if (ex.rest > 0) timer.start(ex.rest);
+  };
+
+  const undoSet = (setIdx) => updateSet(setIdx, "done", false);
+
+  const progressionFlag = useMemo(() => {
+    // All sets at top of range? → suggest load up
+    if (ex.progressInc === 0) return null;
+    const allDone = exState.sets.every(s => s.done);
+    if (!allDone) return null;
+    const allTop = exState.sets.every((s, i) => topRepHit(ex.reps[i], parseInt(s.reps)));
+    if (allTop) {
+      const w = parseFloat(exState.sets[0].weight);
+      if (!isNaN(w)) return `Load up next session: +${ex.progressInc} lb → ${w + ex.progressInc} lb`;
+    }
+    return null;
+  }, [exState, ex]);
+
+  const totalEx = day.exercises.length;
+  const doneEx = session.exercises.filter(e => e.sets.every(s=>s.done)).length;
+
+  return (
+    <div className="session">
+      <div className="session-header">
+        <div>
+          <div className="session-day">{day.label}</div>
+          <div className="session-progress">EX {exerciseIdx+1}/{totalEx} · {doneEx} complete</div>
+        </div>
+        <div className="session-actions">
+          <button className="warmup-btn" onClick={() => { setWarmupKey(day.warmup); setView("warmup"); }}>WARM-UP</button>
+        </div>
+      </div>
+
+      {/* Exercise pager */}
+      <div className="ex-pager">
+        {day.exercises.map((e, i) => {
+          const isDone = session.exercises[i].sets.every(s => s.done);
+          const isCurrent = i === exerciseIdx;
+          return (
+            <button
+              key={e.id}
+              className={`dot ${isCurrent?"current":""} ${isDone?"done":""}`}
+              onClick={() => setExerciseIdx(i)}
+              aria-label={`Exercise ${i+1}`}
+            >{i+1}</button>
+          );
+        })}
+      </div>
+
+      <div className="ex-card">
+        <div className="ex-meta">
+          <div className="ex-cat">{ex.category.toUpperCase()} · {ex.scheme.toUpperCase()}</div>
+          {ex.optional && <div className="ex-opt">OPTIONAL</div>}
+        </div>
+        <h2 className="ex-name">{ex.name}</h2>
+        {ex.supersetWith && (
+          <div className="superset-tag">⇆ Superset with: {day.exercises.find(e=>e.id===ex.supersetWith)?.name}</div>
+        )}
+        <div className="ex-note">{ex.note}</div>
+
+        {prevSame && (
+          <div className="prev-row">
+            <span className="prev-label">LAST · {new Date(prevSame.date).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</span>
+            <span className="prev-sets">
+              {prevSame.sets.map((s,i)=>(
+                <span key={i} className="prev-set">{s.weight||"—"}×{s.reps||"—"}</span>
+              ))}
+            </span>
+          </div>
+        )}
+        {prs[ex.id] && (
+          <div className="pr-row">PR: {prs[ex.id].weight} × {prs[ex.id].reps} ({fmtDate(prs[ex.id].date)})</div>
+        )}
+
+        <div className="sets-block">
+          {exState.sets.map((set, i) => (
+            <SetRow
+              key={i}
+              setIdx={i}
+              set={set}
+              target={ex.reps[i]}
+              category={ex.category}
+              onChange={(field, val) => updateSet(i, field, val)}
+              onComplete={() => completeSet(i)}
+              onUndo={() => undoSet(i)}
+            />
+          ))}
+        </div>
+
+        {progressionFlag && (
+          <div className="flag flag-up">⬆ {progressionFlag}</div>
+        )}
+
+        {ex.rest > 0 && (
+          <div className="rest-shortcuts">
+            <span className="rest-label">REST:</span>
+            <button onClick={()=>timer.start(60)}>1:00</button>
+            <button onClick={()=>timer.start(90)}>1:30</button>
+            <button onClick={()=>timer.start(120)}>2:00</button>
+            <button onClick={()=>timer.start(180)}>3:00</button>
+          </div>
+        )}
+      </div>
+
+      <div className="ex-nav">
+        <button
+          className="ex-nav-btn"
+          disabled={exerciseIdx===0}
+          onClick={()=>setExerciseIdx(exerciseIdx-1)}
+        >← Prev</button>
+        {exerciseIdx < totalEx-1 ? (
+          <button className="ex-nav-btn primary" onClick={()=>setExerciseIdx(exerciseIdx+1)}>Next →</button>
+        ) : (
+          <button className="ex-nav-btn primary" onClick={completeSession}>Finish Session ✓</button>
+        )}
+      </div>
+
+      <button className="abandon" onClick={()=>{
+        if (confirm("Abandon this session? Logged data will be lost.")) abandonSession();
+      }}>Abandon session</button>
+    </div>
+  );
+}
+
+function SetRow({ setIdx, set, target, category, onChange, onComplete, onUndo }) {
+  const isCore = category === "core" || category === "carry";
+  return (
+    <div className={`set-row ${set.done?"done":""}`}>
+      <div className="set-idx">{setIdx+1}</div>
+      <div className="set-target">{target}</div>
+      <input
+        className="set-input"
+        type="number"
+        inputMode="decimal"
+        placeholder={isCore?"—":"lb"}
+        value={set.weight}
+        onChange={e => onChange("weight", e.target.value)}
+        disabled={set.done}
+      />
+      <input
+        className="set-input"
+        type="number"
+        inputMode="numeric"
+        placeholder="reps"
+        value={set.reps}
+        onChange={e => onChange("reps", e.target.value)}
+        disabled={set.done}
+      />
+      <input
+        className="set-input rpe"
+        type="number"
+        inputMode="decimal"
+        placeholder="RPE"
+        step="0.5"
+        min="1" max="10"
+        value={set.rpe}
+        onChange={e => onChange("rpe", e.target.value)}
+        disabled={set.done}
+      />
+      {set.done ? (
+        <button className="set-btn done-btn" onClick={onUndo}>✓</button>
+      ) : (
+        <button className="set-btn complete-btn" onClick={onComplete}>LOG</button>
+      )}
+    </div>
+  );
+}
+
+// ======================== FLOATING TIMER ========================
+function FloatingTimer({ timer }) {
+  return (
+    <div className="floating-timer">
+      <div className="ft-time">{fmtTime(timer.remaining)}</div>
+      <div className="ft-actions">
+        <button onClick={()=>timer.add(15)}>+15s</button>
+        <button onClick={()=>timer.add(-15)}>-15s</button>
+        <button onClick={timer.stop} className="ft-stop">SKIP</button>
+      </div>
+    </div>
+  );
+}
+
+// ======================== WARMUP VIEW ========================
+function WarmupView({ warmupKey, setView }) {
+  const w = WARMUPS[warmupKey];
+  const [checked, setChecked] = useState({});
+  const toggle = (k) => setChecked(c => ({...c, [k]: !c[k]}));
+
+  return (
+    <div className="warmup">
+      <h2 className="warmup-title">{w.title}</h2>
+      <div className="warmup-blocks">
+        {w.blocks.map((b, bi) => (
+          <div key={bi} className="warmup-block">
+            <div className="wb-name">{b.name}</div>
+            <div className="wb-items">
+              {b.items.map((it, ii) => {
+                const k = `${bi}-${ii}`;
+                return (
+                  <label key={k} className={`wb-item ${checked[k]?"checked":""}`} onClick={()=>toggle(k)}>
+                    <span className="wb-box">{checked[k]?"✓":""}</span>
+                    <span className="wb-text">{it}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="warmup-critical">
+        <div className="wc-label">CRITICAL</div>
+        <div className="wc-text">{w.critical}</div>
+      </div>
+      <button className="warmup-done" onClick={()=>setView("session")}>← Back to session</button>
+    </div>
+  );
+}
+
+// ======================== PROGRAM VIEW ========================
+function ProgramView({ currentWeek, currentPhase, persistWeek }) {
+  const weeks = [1,2,3,4,5,6,7,8,9,10,11,12];
+  const weekPhase = (w) => {
+    if (w === DELOAD_WEEK) return "deload";
+    if (w <= 4) return 1;
+    if (w <= 8) return 2;
+    return 3;
+  };
+  const phaseColor = (p) => {
+    if (p === 1) return "p1";
+    if (p === 2) return "p2";
+    if (p === 3) return "p3";
+    return "deload";
+  };
+
+  // Get exercise list for the selected phase (preview)
+  const [previewPhase, setPreviewPhase] = useState(currentPhase === "deload" ? 2 : currentPhase);
+  const previewProgram = useMemo(() => {
+    if (previewPhase === "deload") return deloadProgram(2);
+    return programForPhase(previewPhase);
+  }, [previewPhase]);
+
+  return (
+    <div className="program-view">
+      <div className="prog-current">
+        <div className="pc-label">CURRENT WEEK</div>
+        <div className="pc-week">WEEK {currentWeek}</div>
+        <div className={`pc-phase phase-${phaseColor(currentPhase)}`}>
+          {currentPhase === "deload" ? "DELOAD" : PHASE_META[currentPhase]?.name}
+        </div>
+        {currentPhase !== "deload" && (
+          <div className="pc-cal">Target: {PHASE_META[currentPhase]?.cal}</div>
+        )}
+        <div className="pc-focus">{currentPhase === "deload" ? "Drop ~20% load, stop 2+ reps short of failure (RPE 6-7). One less set per exercise. Recover before final push." : PHASE_META[currentPhase]?.focus}</div>
+      </div>
+
+      <div className="section-label">12-WEEK ROADMAP — TAP TO SET CURRENT WEEK</div>
+      <div className="week-grid">
+        {weeks.map(w => {
+          const p = weekPhase(w);
+          const isCurrent = w === currentWeek;
+          return (
+            <button
+              key={w}
+              className={`week-cell ${isCurrent ? "current" : ""} phase-${phaseColor(p)}`}
+              onClick={() => persistWeek(w)}
+            >
+              <div className="wc-num">WK {w}</div>
+              <div className="wc-tag">
+                {p === "deload" ? "DELOAD" : `P${p}`}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="section-label" style={{marginTop: 18}}>PHASE PREVIEW</div>
+      <div className="phase-tabs">
+        {[1, 2, "deload", 3].map(p => (
+          <button
+            key={p}
+            className={`phase-tab ${previewPhase === p ? "active" : ""} phase-${phaseColor(p)}`}
+            onClick={() => setPreviewPhase(p)}
+          >
+            {p === "deload" ? "Wk 9 Deload" : `Phase ${p}`}
+          </button>
+        ))}
+      </div>
+
+      <div className="phase-preview-meta">
+        {previewPhase === "deload" ? (
+          <>
+            <div className="ppm-name">Deload Week (Wk 9)</div>
+            <div className="ppm-detail">Same exercises as Phase 2, but: drop 1 set per exercise · drop load ~20% · RPE 6-7 (2+ reps in reserve) · all warm-ups stay normal. Goal: recover the nervous system before final push.</div>
+          </>
+        ) : (
+          <>
+            <div className="ppm-name">{PHASE_META[previewPhase].name}</div>
+            <div className="ppm-detail">Weeks {PHASE_META[previewPhase].weeks.join(", ")} · {PHASE_META[previewPhase].cal} · {PHASE_META[previewPhase].focus}</div>
+          </>
+        )}
+      </div>
+
+      {["monday", "wednesday", "friday"].map(dayKey => {
+        const day = previewProgram[dayKey];
+        return (
+          <div key={dayKey} className="prog-day">
+            <div className="prog-day-header">{day.label}</div>
+            <div className="prog-ex-list">
+              {day.exercises.filter(e => e.category !== "core" && e.category !== "finisher").map((ex, i) => (
+                <div key={ex.id} className="prog-ex-row">
+                  <div className="pex-num">{i+1}</div>
+                  <div className="pex-body">
+                    <div className="pex-name">{ex.name}</div>
+                    <div className="pex-meta">
+                      {ex.sets} × {ex.reps[0]}{ex.scheme === "RPT" ? ` (RPT)` : ""}
+                      {ex.supersetWith && <span className="pex-ss"> ⇆ superset</span>}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+
+      <div className="prog-footer">
+        Block reassessment due Week 12 (~Aug 19, 2026). Tap any week above to switch — the active week drives what shows when you start a session.
+      </div>
+    </div>
+  );
+}
+function History({ workouts, prs, setView }) {
+  const completed = Object.values(workouts).filter(s=>s.completed).sort((a,b)=>b.startedAt-a.startedAt);
+  const [expanded, setExpanded] = useState(null);
+
+  if (completed.length === 0) {
+    return <div className="empty">No sessions logged yet. Start your first workout from Home.</div>;
+  }
+
+  return (
+    <div className="history">
+      <div className="prs-block">
+        <div className="section-label">CURRENT PRs (est 1RM by Epley)</div>
+        <div className="prs-list">
+          {Object.entries(prs).slice(0, 8).map(([id, pr]) => {
+            const ex = ALL_EXERCISES[id];
+            if (!ex) return null;
+            return (
+              <div key={id} className="pr-card">
+                <div className="pr-ex">{ex.name}</div>
+                <div className="pr-val">{pr.weight} × {pr.reps}</div>
+                <div className="pr-date">{fmtDate(pr.date)}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="section-label">SESSION LOG</div>
+      {completed.map(s => {
+        const dayShort = s.dayKey === "monday" ? "MON" : s.dayKey === "wednesday" ? "WED" : "FRI";
+        const isOpen = expanded === s.id;
+        const totalSets = s.exercises.reduce((n,e)=>n+e.sets.filter(x=>x.done).length,0);
+        const duration = s.finishedAt ? Math.round((s.finishedAt - s.startedAt)/60000) : 0;
+        const phaseTag = s.phase === "deload" ? "DELOAD" : s.phase ? `P${s.phase}` : null;
+        return (
+          <div key={s.id} className={`session-row ${isOpen?"open":""}`}>
+            <button className="session-row-head" onClick={()=>setExpanded(isOpen?null:s.id)}>
+              <div>
+                <div className="srh-day">
+                  {dayShort} · {new Date(s.startedAt).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}
+                  {s.week && <span className="srh-week"> · Wk {s.week}{phaseTag ? ` ${phaseTag}` : ""}</span>}
+                </div>
+                <div className="srh-sub">{totalSets} sets · {duration} min</div>
+              </div>
+              <span className="srh-arrow">{isOpen?"▾":"▸"}</span>
+            </button>
+            {isOpen && (
+              <div className="session-detail">
+                {s.exercises.map((ex, i) => {
+                  const exDef = ALL_EXERCISES[ex.id];
+                  const loggedSets = ex.sets.filter(x=>x.done);
+                  if (loggedSets.length === 0) return null;
+                  return (
+                    <div key={ex.id} className="hist-ex">
+                      <div className="hist-ex-name">{exDef ? exDef.name : ex.id}</div>
+                      <div className="hist-sets">
+                        {ex.sets.map((set, si) => set.done && (
+                          <div key={si} className="hist-set">
+                            <span>{set.weight||"—"} × {set.reps||"—"}</span>
+                            {set.rpe && <span className="hist-rpe">@{set.rpe}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ======================== BODY TRACKER ========================
+function BodyTracker({ bodyweight, persistBW, exportData, importData }) {
+  const [date, setDate] = useState(todayISO());
+  const [weight, setWeight] = useState("");
+  const [importMsg, setImportMsg] = useState(null);
+  const fileInputRef = useRef(null);
+  const pendingModeRef = useRef("merge");
+
+  const triggerImport = (mode) => {
+    pendingModeRef.current = mode;
+    if (mode === "replace") {
+      if (!confirm("REPLACE all existing data with the backup file?\n\nThis wipes your current logs, body weight, and PRs.")) return;
+    }
+    fileInputRef.current?.click();
+  };
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-importing same file
+    if (!file) return;
+    try {
+      const result = await importData(file, pendingModeRef.current);
+      setImportMsg({
+        ok: true,
+        text: `Imported · ${result.workouts} sessions · ${result.bodyweight} weigh-ins · ${result.prs} PRs`
+      });
+    } catch (err) {
+      setImportMsg({ ok: false, text: err.message || "Import failed." });
+    }
+    setTimeout(() => setImportMsg(null), 6000);
+  };
+
+  const add = () => {
+    const w = parseFloat(weight);
+    if (isNaN(w)) return;
+    const filtered = bodyweight.filter(b => b.date !== date);
+    const next = [...filtered, { date, weight: w }].sort((a,b)=>a.date.localeCompare(b.date));
+    persistBW(next);
+    setWeight("");
+  };
+
+  const remove = (d) => {
+    persistBW(bodyweight.filter(b => b.date !== d));
+  };
+
+  // Compute 7-day averages
+  const withAvg = useMemo(() => {
+    return bodyweight.map((b, i) => {
+      const cutoff = new Date(b.date+"T12:00:00").getTime() - 6*86400000;
+      const window = bodyweight.filter(x => {
+        const t = new Date(x.date+"T12:00:00").getTime();
+        return t >= cutoff && t <= new Date(b.date+"T12:00:00").getTime();
+      });
+      const avg = window.reduce((s,x)=>s+x.weight,0)/window.length;
+      return { ...b, avg };
+    });
+  }, [bodyweight]);
+
+  // SVG sparkline
+  const chart = useMemo(() => {
+    if (bodyweight.length < 2) return null;
+    const W = 320, H = 140, P = 16;
+    const vals = bodyweight.map(b => b.weight);
+    const min = Math.min(...vals) - 1;
+    const max = Math.max(...vals) + 1;
+    const x = (i) => P + (i/(bodyweight.length-1)) * (W - 2*P);
+    const y = (v) => H - P - ((v-min)/(max-min)) * (H - 2*P);
+    const pts = bodyweight.map((b,i) => `${x(i)},${y(b.weight)}`).join(" ");
+    const avgPts = withAvg.map((b,i) => `${x(i)},${y(b.avg)}`).join(" ");
+    return (
+      <svg className="bw-chart" viewBox={`0 0 ${W} ${H}`}>
+        <polyline points={pts} fill="none" stroke="#444" strokeWidth="1" strokeDasharray="2 3" />
+        <polyline points={avgPts} fill="none" stroke="#e8e8e8" strokeWidth="2" />
+        {bodyweight.map((b,i) => (
+          <circle key={i} cx={x(i)} cy={y(b.weight)} r="2" fill="#888" />
+        ))}
+        <text x={P} y={12} fill="#888" fontSize="9">{max.toFixed(0)}</text>
+        <text x={P} y={H-2} fill="#888" fontSize="9">{min.toFixed(0)}</text>
+      </svg>
+    );
+  }, [bodyweight, withAvg]);
+
+  const start = bodyweight[0];
+  const latest = bodyweight[bodyweight.length-1];
+
+  return (
+    <div className="body">
+      <div className="bw-summary">
+        <div className="bw-stat"><div className="bs-num">{latest?latest.weight:"—"}</div><div className="bs-lbl">Latest</div></div>
+        <div className="bw-stat"><div className="bs-num">{start?start.weight:"—"}</div><div className="bs-lbl">Start</div></div>
+        <div className="bw-stat"><div className="bs-num">{start&&latest?(latest.weight-start.weight).toFixed(1):"—"}</div><div className="bs-lbl">Change</div></div>
+      </div>
+
+      {chart}
+
+      <div className="bw-add">
+        <input type="date" value={date} onChange={e=>setDate(e.target.value)} />
+        <input type="number" inputMode="decimal" placeholder="weight (lb)" value={weight} onChange={e=>setWeight(e.target.value)} />
+        <button onClick={add}>+ ADD</button>
+      </div>
+
+      <div className="bw-help">
+        Morning, post-bathroom, pre-food. Daily fluctuation is noise — trust the 7-day average (white line).
+      </div>
+
+      <div className="bw-list">
+        {[...bodyweight].reverse().slice(0,30).map(b => (
+          <div key={b.date} className="bw-row">
+            <div>
+              <div className="bw-date">{fmtDate(b.date)}</div>
+              <div className="bw-avg">7d avg: {withAvg.find(x=>x.date===b.date)?.avg.toFixed(1)}</div>
+            </div>
+            <div className="bw-w">{b.weight}<span className="unit"> lb</span></div>
+            <button className="bw-x" onClick={()=>remove(b.date)}>×</button>
+          </div>
+        ))}
+      </div>
+
+      <div className="backup-section">
+        <div className="section-label">BACKUP / RESTORE</div>
+        <div className="backup-help">
+          Browser storage can be cleared by iOS or by clearing site data. Export regularly — store the JSON in iCloud, Drive, or email it to yourself.
+        </div>
+        <div className="backup-actions">
+          <button className="backup-btn" onClick={exportData}>↓ EXPORT JSON</button>
+          <button className="backup-btn" onClick={()=>triggerImport("merge")}>↑ IMPORT (MERGE)</button>
+          <button className="backup-btn danger" onClick={()=>triggerImport("replace")}>↑ IMPORT (REPLACE)</button>
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json,.json"
+          style={{display:"none"}}
+          onChange={handleFile}
+        />
+        {importMsg && (
+          <div className={`import-msg ${importMsg.ok?"ok":"err"}`}>{importMsg.text}</div>
+        )}
+        <div className="backup-modes">
+          <strong>Merge</strong> keeps existing data, adds new sessions/weigh-ins, takes the higher PR on conflicts. <strong>Replace</strong> wipes everything and restores only what's in the file — use this when moving to a new device.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --bg-elev: #141414;
+    --bg-card: #1a1a1a;
+    --line: #262626;
+    --line-bright: #3a3a3a;
+    --text: #f0f0f0;
+    --text-dim: #888;
+    --text-faint: #555;
+    --accent: #ff5722;
+    --accent-dim: #c04018;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --danger: #ef4444;
+  }
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&display=swap');
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: 'Space Grotesk', -apple-system, sans-serif; overscroll-behavior: none; }
+
+  .app { min-height: 100vh; max-width: 540px; margin: 0 auto; padding-bottom: 80px; position: relative; }
+  .loading { padding: 40px; text-align: center; color: var(--text-dim); }
+
+  /* TOPBAR */
+  .topbar {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--bg);
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .brand { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 12px; letter-spacing: 0.15em; color: var(--text); }
+  .resume {
+    background: transparent; border: 1px solid var(--accent); color: var(--accent);
+    padding: 4px 10px; border-radius: 2px; font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    font-weight: 700; letter-spacing: 0.1em; cursor: pointer;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+  /* MAIN */
+  .main { padding: 16px 18px; }
+
+  /* HOME */
+  .home { display: flex; flex-direction: column; gap: 24px; }
+  .section { display: flex; flex-direction: column; gap: 10px; }
+  .section-label {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.15em; color: var(--text-dim);
+  }
+  .card { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px; padding: 16px; }
+
+  .resume-card {
+    background: linear-gradient(135deg, rgba(255,87,34,0.08), transparent);
+    border-color: var(--accent); cursor: pointer;
+  }
+  .resume-badge {
+    display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 9px;
+    font-weight: 700; letter-spacing: 0.15em; color: var(--accent); margin-bottom: 8px;
+  }
+  .resume-title { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
+  .resume-sub { font-size: 12px; color: var(--text-dim); }
+
+  .day-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .day-card {
+    background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px;
+    padding: 14px 8px; cursor: pointer; color: var(--text); text-align: center;
+    transition: all 0.15s; position: relative;
+  }
+  .day-card:active:not(:disabled) { transform: scale(0.97); }
+  .day-card:disabled { opacity: 0.4; cursor: not-allowed; }
+  .day-card.highlight { border-color: var(--accent); background: rgba(255,87,34,0.05); }
+  .day-short { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 18px; letter-spacing: 0.05em; }
+  .day-name { font-size: 10px; color: var(--text-dim); margin-top: 4px; line-height: 1.2; }
+  .day-tag {
+    font-family: 'JetBrains Mono', monospace; font-size: 8px; font-weight: 700;
+    letter-spacing: 0.15em; color: var(--accent); margin-top: 6px;
+  }
+
+  .quick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .quick {
+    background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px;
+    padding: 14px; text-align: left; cursor: pointer; color: var(--text);
+  }
+  .quick-t { font-weight: 500; font-size: 13px; }
+  .quick-s { font-size: 11px; color: var(--text-dim); margin-top: 3px; }
+
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px; padding: 14px; }
+  .stat-num { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 22px; line-height: 1; }
+  .unit { font-size: 12px; color: var(--text-dim); font-weight: 400; }
+  .stat-lbl { font-size: 10px; color: var(--text-dim); margin-top: 6px; letter-spacing: 0.05em; text-transform: uppercase; }
+
+  .recent-list { display: flex; flex-direction: column; gap: 4px; }
+  .recent-row {
+    background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px;
+    padding: 12px 14px; display: flex; justify-content: space-between; align-items: center;
+  }
+  .recent-day { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 13px; }
+  .recent-date { font-size: 11px; color: var(--text-dim); }
+  .recent-meta { font-size: 11px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; }
+
+  .targets {
+    background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px;
+    padding: 6px 14px;
+  }
+  .target-row {
+    display: flex; justify-content: space-between; padding: 10px 0;
+    border-bottom: 1px solid var(--line); font-size: 13px;
+  }
+  .target-row:last-child { border-bottom: none; }
+  .t-val { font-family: 'JetBrains Mono', monospace; color: var(--text); font-weight: 500; }
+
+  /* SESSION */
+  .session { display: flex; flex-direction: column; gap: 14px; }
+  .session-header {
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  }
+  .session-day { font-weight: 700; font-size: 14px; line-height: 1.3; }
+  .session-progress {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim);
+    letter-spacing: 0.1em; margin-top: 4px;
+  }
+  .warmup-btn {
+    background: transparent; border: 1px solid var(--line-bright); color: var(--text-dim);
+    padding: 6px 10px; border-radius: 2px; font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.1em; cursor: pointer; white-space: nowrap;
+  }
+
+  .ex-pager { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0; }
+  .dot {
+    flex-shrink: 0; width: 30px; height: 30px; border-radius: 50%;
+    background: var(--bg-elev); border: 1px solid var(--line); color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .dot.current { border-color: var(--accent); color: var(--accent); }
+  .dot.done { background: var(--bg-card); color: var(--ok); border-color: var(--ok); }
+
+  .ex-card { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px; padding: 18px; }
+  .ex-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .ex-cat { font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 0.15em; color: var(--text-dim); font-weight: 700; }
+  .ex-opt { font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 0.15em; color: var(--warn); font-weight: 700; }
+  .ex-name { font-size: 20px; font-weight: 700; margin: 0 0 8px; line-height: 1.2; }
+  .superset-tag { font-size: 11px; color: var(--accent); margin-bottom: 8px; font-style: italic; }
+  .ex-note {
+    font-size: 12px; color: var(--text-dim); padding: 10px 12px; background: var(--bg);
+    border-left: 2px solid var(--line-bright); border-radius: 2px; margin-bottom: 14px; line-height: 1.4;
+  }
+  .prev-row {
+    display: flex; flex-direction: column; gap: 4px; padding: 8px 0;
+    border-top: 1px solid var(--line); margin-top: 8px;
+  }
+  .prev-label { font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: var(--text-faint); }
+  .prev-sets { display: flex; gap: 8px; flex-wrap: wrap; }
+  .prev-set { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim); }
+  .pr-row { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--warn); margin-top: 4px; letter-spacing: 0.05em; }
+
+  .sets-block { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+  .set-row {
+    display: grid;
+    grid-template-columns: 28px 64px 1fr 1fr 50px 60px;
+    gap: 6px; align-items: center;
+  }
+  .set-row.done .set-input { color: var(--text-dim); }
+  .set-idx {
+    font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 14px;
+    color: var(--text-dim); text-align: center;
+  }
+  .set-target {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim);
+    background: var(--bg); padding: 6px 4px; border-radius: 2px; text-align: center;
+    border: 1px solid var(--line);
+  }
+  .set-input {
+    background: var(--bg); border: 1px solid var(--line-bright); color: var(--text);
+    padding: 10px 8px; border-radius: 2px; font-family: 'JetBrains Mono', monospace;
+    font-size: 14px; font-weight: 500; text-align: center; width: 100%; -moz-appearance: textfield;
+  }
+  .set-input::-webkit-outer-spin-button, .set-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .set-input:focus { outline: none; border-color: var(--accent); }
+  .set-input.rpe { color: var(--warn); }
+  .set-btn {
+    padding: 10px 4px; border-radius: 2px; font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; cursor: pointer;
+  }
+  .complete-btn { background: var(--accent); color: white; border: none; }
+  .complete-btn:active { background: var(--accent-dim); }
+  .done-btn { background: var(--ok); color: var(--bg); border: none; font-size: 16px; }
+
+  .flag {
+    margin-top: 14px; padding: 10px 12px; border-radius: 2px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700;
+  }
+  .flag-up { background: rgba(74,222,128,0.1); color: var(--ok); border: 1px solid rgba(74,222,128,0.3); }
+
+  .rest-shortcuts {
+    display: flex; gap: 6px; align-items: center; margin-top: 14px; flex-wrap: wrap;
+  }
+  .rest-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim); letter-spacing: 0.1em; }
+  .rest-shortcuts button {
+    background: var(--bg); border: 1px solid var(--line-bright); color: var(--text);
+    padding: 6px 10px; border-radius: 2px; font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; cursor: pointer;
+  }
+  .rest-shortcuts button:active { background: var(--bg-card); }
+
+  .ex-nav { display: flex; gap: 8px; margin-top: 4px; }
+  .ex-nav-btn {
+    flex: 1; padding: 14px; background: var(--bg-elev); border: 1px solid var(--line-bright);
+    color: var(--text); border-radius: 4px; font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; font-weight: 700; letter-spacing: 0.05em; cursor: pointer;
+  }
+  .ex-nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+  .ex-nav-btn.primary { background: var(--accent); color: white; border-color: var(--accent); }
+  .ex-nav-btn:active:not(:disabled) { transform: scale(0.98); }
+
+  .abandon {
+    background: transparent; border: none; color: var(--text-faint);
+    padding: 16px; text-align: center; font-size: 11px; cursor: pointer; margin-top: 8px;
+    text-decoration: underline;
+  }
+
+  /* FLOATING TIMER */
+  .floating-timer {
+    position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%);
+    background: var(--accent); color: white; padding: 12px 20px; border-radius: 6px;
+    display: flex; gap: 12px; align-items: center; z-index: 20;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+    max-width: 92%; width: 480px;
+  }
+  .ft-time {
+    font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 22px;
+    letter-spacing: 0.05em; min-width: 70px;
+  }
+  .ft-actions { display: flex; gap: 6px; margin-left: auto; }
+  .ft-actions button {
+    background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: white;
+    padding: 6px 10px; border-radius: 2px; font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; font-weight: 700; cursor: pointer;
+  }
+  .ft-stop { background: rgba(255,255,255,0.35) !important; }
+
+  /* WARMUP */
+  .warmup { display: flex; flex-direction: column; gap: 14px; }
+  .warmup-title { font-size: 18px; font-weight: 700; margin: 0; }
+  .warmup-blocks { display: flex; flex-direction: column; gap: 8px; }
+  .warmup-block { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px; padding: 14px; }
+  .wb-name { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.1em; color: var(--accent); margin-bottom: 10px; }
+  .wb-items { display: flex; flex-direction: column; gap: 6px; }
+  .wb-item {
+    display: flex; gap: 10px; align-items: flex-start; padding: 8px;
+    background: var(--bg); border-radius: 2px; cursor: pointer; font-size: 13px;
+    border: 1px solid var(--line);
+  }
+  .wb-item.checked { opacity: 0.5; text-decoration: line-through; }
+  .wb-box {
+    flex-shrink: 0; width: 18px; height: 18px; border: 1px solid var(--line-bright);
+    border-radius: 2px; display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: var(--ok);
+  }
+  .wb-item.checked .wb-box { border-color: var(--ok); background: rgba(74,222,128,0.1); }
+  .wb-text { flex: 1; }
+  .warmup-critical {
+    background: rgba(255,87,34,0.08); border: 1px solid var(--accent);
+    border-radius: 4px; padding: 14px;
+  }
+  .wc-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.15em; color: var(--accent); margin-bottom: 6px; }
+  .wc-text { font-size: 13px; line-height: 1.4; }
+  .warmup-done {
+    background: var(--bg-elev); border: 1px solid var(--line-bright); color: var(--text);
+    padding: 14px; border-radius: 4px; font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; font-weight: 700; cursor: pointer; margin-top: 8px;
+  }
+
+  /* HISTORY */
+  .history { display: flex; flex-direction: column; gap: 16px; }
+  .empty { text-align: center; padding: 60px 20px; color: var(--text-dim); font-size: 14px; }
+  .prs-list { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .pr-card { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px; padding: 10px; }
+  .pr-ex { font-size: 11px; color: var(--text-dim); margin-bottom: 6px; line-height: 1.2; min-height: 28px; }
+  .pr-val { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 16px; color: var(--warn); }
+  .pr-date { font-family: 'JetBrains Mono', monospace; font-size: 9px; color: var(--text-faint); margin-top: 4px; }
+
+  .session-row { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .session-row-head {
+    width: 100%; padding: 14px; background: transparent; border: none;
+    color: var(--text); display: flex; justify-content: space-between; align-items: center;
+    cursor: pointer; text-align: left;
+  }
+  .srh-day { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 13px; }
+  .srh-sub { font-size: 11px; color: var(--text-dim); margin-top: 3px; }
+  .srh-arrow { font-size: 14px; color: var(--text-dim); }
+  .session-detail { padding: 0 14px 14px; border-top: 1px solid var(--line); }
+  .hist-ex { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .hist-ex:last-child { border-bottom: none; }
+  .hist-ex-name { font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+  .hist-sets { display: flex; gap: 10px; flex-wrap: wrap; }
+  .hist-set { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-dim); }
+  .hist-rpe { color: var(--warn); margin-left: 4px; }
+
+  /* BODY */
+  .body { display: flex; flex-direction: column; gap: 16px; }
+  .bw-summary { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .bw-stat { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px; padding: 14px; text-align: center; }
+  .bs-num { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 22px; }
+  .bs-lbl { font-size: 10px; color: var(--text-dim); margin-top: 4px; letter-spacing: 0.1em; text-transform: uppercase; }
+  .bw-chart { width: 100%; height: auto; background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px; padding: 8px; }
+  .bw-add { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; }
+  .bw-add input {
+    background: var(--bg-elev); border: 1px solid var(--line-bright); color: var(--text);
+    padding: 12px; border-radius: 2px; font-family: 'JetBrains Mono', monospace; font-size: 13px;
+  }
+  .bw-add input:focus { outline: none; border-color: var(--accent); }
+  .bw-add button {
+    background: var(--accent); color: white; border: none; padding: 12px 18px; border-radius: 2px;
+    font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 11px; letter-spacing: 0.1em; cursor: pointer;
+  }
+  .bw-help { font-size: 11px; color: var(--text-dim); line-height: 1.4; padding: 0 4px; }
+  .bw-list { display: flex; flex-direction: column; gap: 4px; }
+  .bw-row {
+    background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px;
+    padding: 10px 14px; display: flex; align-items: center; gap: 12px;
+  }
+  .bw-date { font-size: 12px; }
+  .bw-avg { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-faint); margin-top: 2px; }
+  .bw-w { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 16px; margin-left: auto; }
+  .bw-x {
+    background: transparent; border: none; color: var(--text-faint); font-size: 18px;
+    cursor: pointer; padding: 0 4px;
+  }
+
+  .backup-section {
+    display: flex; flex-direction: column; gap: 10px;
+    margin-top: 16px; padding-top: 20px; border-top: 1px solid var(--line);
+  }
+  .backup-help { font-size: 11px; color: var(--text-dim); line-height: 1.4; padding: 0 4px; }
+  .backup-actions { display: flex; flex-direction: column; gap: 6px; }
+  .backup-btn {
+    background: var(--bg-elev); border: 1px solid var(--line-bright); color: var(--text);
+    padding: 14px; border-radius: 2px; font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; font-weight: 700; letter-spacing: 0.1em; cursor: pointer;
+    text-align: left;
+  }
+  .backup-btn:active { background: var(--bg-card); }
+  .backup-btn.danger { color: var(--danger); border-color: rgba(239,68,68,0.3); }
+  .import-msg {
+    padding: 10px 12px; border-radius: 2px; font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; line-height: 1.4;
+  }
+  .import-msg.ok { background: rgba(74,222,128,0.1); color: var(--ok); border: 1px solid rgba(74,222,128,0.3); }
+  .import-msg.err { background: rgba(239,68,68,0.1); color: var(--danger); border: 1px solid rgba(239,68,68,0.3); }
+  .backup-modes { font-size: 10px; color: var(--text-faint); line-height: 1.5; padding: 0 4px; }
+  .backup-modes strong { color: var(--text-dim); font-weight: 700; }
+
+  /* BOTTOM NAV */
+  .bottomnav {
+    position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+    width: 100%; max-width: 540px; background: var(--bg); border-top: 1px solid var(--line);
+    display: grid; grid-template-columns: 1fr 1fr 1fr; padding: 8px 0 12px;
+    z-index: 9;
+  }
+  .bottomnav.four { grid-template-columns: 1fr 1fr 1fr 1fr; }
+  .navbtn {
+    background: transparent; border: none; color: var(--text-faint);
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    padding: 8px; cursor: pointer;
+  }
+  .navbtn.active { color: var(--accent); }
+  .navbtn .icon { font-size: 20px; }
+  .navbtn .label { font-size: 10px; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.1em; }
+
+  /* WEEK BANNER on Home */
+  .week-banner {
+    background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px;
+    padding: 14px 16px; display: flex; justify-content: space-between; align-items: center;
+    gap: 14px; cursor: pointer; transition: border-color 0.15s;
+  }
+  .week-banner:active { border-color: var(--line-bright); }
+  .wb-left { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .wb-week { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 16px; letter-spacing: 0.05em; }
+  .wb-phase { font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.15em; color: var(--accent); font-weight: 700; }
+  .wb-right { display: flex; flex-direction: column; gap: 4px; text-align: right; flex: 1; min-width: 0; }
+  .wb-focus { font-size: 11px; color: var(--text-dim); line-height: 1.3; }
+  .wb-cta { font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: var(--text-faint); }
+
+  /* PROGRAM VIEW */
+  .program-view { display: flex; flex-direction: column; gap: 14px; }
+  .prog-current {
+    background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px;
+    padding: 18px; display: flex; flex-direction: column; gap: 6px;
+  }
+  .pc-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.15em; color: var(--text-dim); font-weight: 700; }
+  .pc-week { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 28px; letter-spacing: 0.05em; }
+  .pc-phase {
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700;
+    letter-spacing: 0.1em; display: inline-block; padding: 4px 10px; border-radius: 2px;
+    width: fit-content;
+  }
+  .pc-phase.phase-p1 { background: rgba(96,165,250,0.12); color: #60a5fa; border: 1px solid rgba(96,165,250,0.3); }
+  .pc-phase.phase-p2 { background: rgba(255,87,34,0.12); color: var(--accent); border: 1px solid rgba(255,87,34,0.3); }
+  .pc-phase.phase-p3 { background: rgba(251,191,36,0.12); color: var(--warn); border: 1px solid rgba(251,191,36,0.3); }
+  .pc-phase.phase-deload { background: rgba(74,222,128,0.12); color: var(--ok); border: 1px solid rgba(74,222,128,0.3); }
+  .pc-cal { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim); }
+  .pc-focus { font-size: 12px; color: var(--text-dim); line-height: 1.4; margin-top: 4px; }
+
+  .week-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  }
+  .week-cell {
+    background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px;
+    padding: 10px 4px; cursor: pointer; color: var(--text);
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    transition: all 0.15s;
+  }
+  .week-cell:active { transform: scale(0.95); }
+  .week-cell.current { border-color: var(--accent); background: rgba(255,87,34,0.08); box-shadow: 0 0 0 1px var(--accent); }
+  .wc-num { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 12px; }
+  .wc-tag {
+    font-family: 'JetBrains Mono', monospace; font-size: 8px; letter-spacing: 0.1em;
+    padding: 2px 4px; border-radius: 1px; font-weight: 700;
+  }
+  .week-cell.phase-p1 .wc-tag { background: rgba(96,165,250,0.15); color: #60a5fa; }
+  .week-cell.phase-p2 .wc-tag { background: rgba(255,87,34,0.15); color: var(--accent); }
+  .week-cell.phase-p3 .wc-tag { background: rgba(251,191,36,0.15); color: var(--warn); }
+  .week-cell.phase-deload .wc-tag { background: rgba(74,222,128,0.15); color: var(--ok); }
+
+  .phase-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+  .phase-tab {
+    background: var(--bg-elev); border: 1px solid var(--line); color: var(--text-dim);
+    padding: 10px 4px; border-radius: 2px; cursor: pointer;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.05em;
+  }
+  .phase-tab.active.phase-p1 { background: rgba(96,165,250,0.12); color: #60a5fa; border-color: rgba(96,165,250,0.4); }
+  .phase-tab.active.phase-p2 { background: rgba(255,87,34,0.12); color: var(--accent); border-color: rgba(255,87,34,0.4); }
+  .phase-tab.active.phase-p3 { background: rgba(251,191,36,0.12); color: var(--warn); border-color: rgba(251,191,36,0.4); }
+  .phase-tab.active.phase-deload { background: rgba(74,222,128,0.12); color: var(--ok); border-color: rgba(74,222,128,0.4); }
+
+  .phase-preview-meta {
+    background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px;
+    padding: 14px;
+  }
+  .ppm-name { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
+  .ppm-detail { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+
+  .prog-day {
+    background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px;
+    overflow: hidden;
+  }
+  .prog-day-header {
+    padding: 12px 14px; font-weight: 700; font-size: 13px;
+    border-bottom: 1px solid var(--line); background: var(--bg);
+  }
+  .prog-ex-list { display: flex; flex-direction: column; }
+  .prog-ex-row {
+    padding: 10px 14px; border-bottom: 1px solid var(--line);
+    display: flex; gap: 12px; align-items: flex-start;
+  }
+  .prog-ex-row:last-child { border-bottom: none; }
+  .pex-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700;
+    color: var(--text-faint); width: 16px; flex-shrink: 0; padding-top: 1px;
+  }
+  .pex-body { flex: 1; min-width: 0; }
+  .pex-name { font-size: 13px; margin-bottom: 3px; line-height: 1.3; }
+  .pex-meta { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim); }
+  .pex-ss { color: var(--accent); margin-left: 4px; }
+
+  .prog-footer {
+    font-size: 11px; color: var(--text-faint); line-height: 1.5; padding: 6px 4px;
+  }
+
+  .srh-week { color: var(--accent); font-weight: 500; }
+
+  /* iOS safe area */
+  @supports (padding: env(safe-area-inset-bottom)) {
+    .bottomnav { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+    .app { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+  }
+</style>
+
+</body>
+</html>
