@@ -2,11 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Recomp">
 <meta name="theme-color" content="#0a0a0a">
 <title>Cramer Recomp</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -275,7 +281,18 @@ function useRestTimer() {
   const [remaining, setRemaining] = useState(0);
   const [active, setActive] = useState(false);
   const endRef = useRef(null);
-  const audioRef = useRef(null);
+  const ctxRef = useRef(null);
+
+  // iOS requires AudioContext creation/resume to happen inside a user gesture.
+  // start() and add() are always called from button taps, so we unlock it there.
+  const ensureAudio = () => {
+    try {
+      if (!ctxRef.current) {
+        ctxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (ctxRef.current.state === "suspended") ctxRef.current.resume();
+    } catch (e) {}
+  };
 
   useEffect(() => {
     let raf;
@@ -298,7 +315,8 @@ function useRestTimer() {
 
   const beep = () => {
     try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = ctxRef.current;
+      if (!ctx || ctx.state !== "running") return;
       const o = ctx.createOscillator(); const g = ctx.createGain();
       o.connect(g); g.connect(ctx.destination);
       o.frequency.value = 880; o.type = "sine";
@@ -309,12 +327,14 @@ function useRestTimer() {
   };
 
   const start = (sec) => {
+    ensureAudio();
     endRef.current = Date.now() + sec*1000;
     setRemaining(sec);
     setActive(true);
   };
   const stop = () => { endRef.current = null; setActive(false); setRemaining(0); };
   const add = (sec) => {
+    ensureAudio();
     if (endRef.current) endRef.current += sec*1000;
     else { endRef.current = Date.now() + sec*1000; setActive(true); }
   };
@@ -1373,6 +1393,19 @@ function BodyTracker({ bodyweight, persistBW, exportData, importData }) {
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 
+<script>
+// PWA: offline support + install-to-home-screen
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
+  });
+}
+// Ask the browser to protect this origin's storage from eviction (best-effort)
+if (navigator.storage && navigator.storage.persist) {
+  navigator.storage.persist().catch(() => {});
+}
+</script>
+
 <style>
   :root {
     --bg: #0a0a0a;
@@ -1389,8 +1422,6 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
     --warn: #fbbf24;
     --danger: #ef4444;
   }
-  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&display=swap');
-
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: 'Space Grotesk', -apple-system, sans-serif; overscroll-behavior: none; }
 
@@ -1550,8 +1581,8 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
   }
   .set-input {
     background: var(--bg); border: 1px solid var(--line-bright); color: var(--text);
-    padding: 10px 8px; border-radius: 2px; font-family: 'JetBrains Mono', monospace;
-    font-size: 14px; font-weight: 500; text-align: center; width: 100%; -moz-appearance: textfield;
+    padding: 10px 6px; border-radius: 2px; font-family: 'JetBrains Mono', monospace;
+    font-size: 16px; font-weight: 500; text-align: center; width: 100%; -moz-appearance: textfield;
   }
   .set-input::-webkit-outer-spin-button, .set-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   .set-input:focus { outline: none; border-color: var(--accent); }
@@ -1685,7 +1716,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
   .bw-add { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; }
   .bw-add input {
     background: var(--bg-elev); border: 1px solid var(--line-bright); color: var(--text);
-    padding: 12px; border-radius: 2px; font-family: 'JetBrains Mono', monospace; font-size: 13px;
+    padding: 12px; border-radius: 2px; font-family: 'JetBrains Mono', monospace; font-size: 16px;
   }
   .bw-add input:focus { outline: none; border-color: var(--accent); }
   .bw-add button {
