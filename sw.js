@@ -2,7 +2,7 @@
 // Strategy: network-first for the page itself (so updates land when online),
 // cache-first for CDN libraries and fonts (so the app boots offline in the garage).
 // Bump CACHE version when you change cached assets.
-const CACHE = "cramer-recomp-v1";
+const CACHE = "cramer-recomp-v2";
 
 const PRECACHE = [
   "./",

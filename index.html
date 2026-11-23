@@ -22,21 +22,70 @@
 <script type="text/babel">
 const { useState, useEffect, useRef, useMemo } = React;
 
-// ======================== PROGRAM DATA (12-week phased structure) ========================
-// Anchor lifts (#1 each day) keep stable IDs across all phases — your PR + progression markers.
-// Other slots use phase-suffixed IDs so each variant tracks its own load history.
-// Phase 1 (wk 1-4): establish. Phase 2 (wk 5-8): push intensity. Phase 3 (wk 10-12): peak.
-// Week 9 is a programmed deload — same exercises as the surrounding phase, reduced volume.
+// ======================== PROGRAM DATA (Nov 2026 restart — Upper / Legs / Upper+) ========================
+// One exercise list for all 12 weeks: Monday full upper, Wednesday legs, Friday upper variation
+// with a lower-body burnout superset. Phases change intent (rebuild -> push -> peak), not exercises.
+// Week 9 is a programmed deload — same exercises, reduced volume.
+// IDs are reused from the earlier program wherever the lift is identical, so load history and PRs carry over.
+// The earlier 12-week program is kept below as legacyProgramForPhase() only so old sessions still resolve.
 
 const PHASE_META = {
-  1: { name: "Phase 1 — Establish",  weeks: [1,2,3,4],    cal: "2,100 cal", focus: "Find working loads. Hit rep ranges with RPE 7-8 on top sets." },
-  2: { name: "Phase 2 — Push",       weeks: [5,6,7,8],    cal: "2,350 cal", focus: "Push loads. Target top of rep range on anchors. RPE 8-9 on top sets." },
-  3: { name: "Phase 3 — Peak",       weeks: [10,11,12],   cal: "Reassess",  focus: "Peak intensity on anchors. Prove PRs before Wk 12 reassessment." }
+  1: { name: "Phase 1 — Rebuild", weeks: [1,2,3,4],  cal: "1,650–1,700 cal", focus: "Start ~10% under old loads. Leave 1-2 reps in the tank. Show up all three days." },
+  2: { name: "Phase 2 — Push",    weeks: [5,6,7,8],  cal: "1,650–1,700 cal", focus: "Add load when set 1 hits the top of the range. Top sets at RPE 8-9." },
+  3: { name: "Phase 3 — Peak",    weeks: [10,11,12], cal: "Reassess",        focus: "Peak the anchor lifts. Prove PRs before the Wk 12 reassessment." }
 };
 
 const DELOAD_WEEK = 9; // sandwiched between Phase 2 and Phase 3
 
 function programForPhase(phase) {
+  return {
+    monday: {
+      label: "MON · Upper",
+      short: "MON",
+      warmup: "upper",
+      exercises: [
+        { id: "mon1", name: "Incline DB Press", scheme: "RPT", sets: 3, reps: ["4-6","6-8","8-10"], rest: 90, note: "Anchor. Alternate with lat pulldown — 75-90s between lifts. Stop 1-2 reps short of failure on presses.", category: "compound", progressInc: 5, supersetWith: "mon2_lat" },
+        { id: "mon2_lat", name: "Lat Pulldown", scheme: "RPT", sets: 3, reps: ["6-8","8-10","10-12"], rest: 90, note: "Anchor. Alternate with incline press. Full stretch at the top, drive elbows down.", category: "compound", progressInc: 5, supersetWith: "mon1" },
+        { id: "mon3a_p1", name: "Seated DB Shoulder Press", scheme: "superset", supersetWith: "mon3b_p1", sets: 2, reps: ["8-10","8-10"], rest: 75, note: "Neutral grip is fine. Leave 1-2 reps in the tank.", category: "compound", progressInc: 5 },
+        { id: "mon3b_p1", name: "Chest-Supported DB Row", scheme: "superset", supersetWith: "mon3a_p1", sets: 2, reps: ["8-10","8-10"], rest: 75, note: "Chest down on incline bench. DROP SET on the last set: cut the weight ~30% and go again.", category: "compound", progressInc: 5 },
+        { id: "mon4a_p1", name: "DB Lateral Raise", scheme: "superset", supersetWith: "mon4b_push", sets: 2, reps: ["12-15","12-15"], rest: 60, note: "DROP SET on the last set.", category: "isolation", progressInc: 2.5 },
+        { id: "mon4b_push", name: "Rope Pushdown", scheme: "superset", supersetWith: "mon4a_p1", sets: 2, reps: ["10-12","10-12"], rest: 60, note: "Pulley tower, rope. Spread the rope at the bottom.", category: "isolation", progressInc: 5 },
+        { id: "mon5", name: "Finisher: BB Curl Burnout", scheme: "amrap", sets: 2, reps: ["8-10","max @ 50%"], rest: 0, note: "One set of 8-10, strip to 50%, go to burnout.", category: "finisher", progressInc: 0 },
+      ]
+    },
+    wednesday: {
+      label: "WED · Legs",
+      short: "WED",
+      warmup: "lower",
+      exercises: [
+        { id: "wed2_p1", name: "Bulgarian Split Squat (DB)", scheme: "RPT", sets: 2, reps: ["6-8/leg","8-10/leg"], rest: 150, note: "Anchor. Main lower builder — heavy legs, low spinal load. Both legs = one set.", category: "compound", progressInc: 5 },
+        { id: "wed_dbrdl", name: "DB Romanian Deadlift", scheme: "RPT", sets: 2, reps: ["6-8","8-10"], rest: 150, note: "Anchor. Hips back, soft knees, DBs to mid-shin. Control the lower.", category: "compound", progressInc: 5 },
+        { id: "wed_hegs", name: "Heel-Elevated Goblet Squat", scheme: "superset", supersetWith: "wed_thrust", sets: 2, reps: ["12-15","12-15"], rest: 75, note: "Heels on a plate. DROP SET on the last set.", category: "compound", progressInc: 5 },
+        { id: "wed_thrust", name: "DB Hip Thrust (off bench)", scheme: "superset", supersetWith: "wed_hegs", sets: 2, reps: ["12-15","12-15"], rest: 75, note: "Pause 1 second at the top.", category: "accessory", progressInc: 5 },
+        { id: "wed4b_p1", name: "Standing Calf Raise (DB in hand)", scheme: "superset", supersetWith: "wed_crunch", sets: 2, reps: ["12-15","12-15"], rest: 60, note: "3-second lower.", category: "accessory", progressInc: 5 },
+        { id: "wed_crunch", name: "Kneeling Cable Crunch", scheme: "superset", supersetWith: "wed4b_p1", sets: 2, reps: ["12-15","12-15"], rest: 60, note: "Pulley tower, rope. Curl the ribs to the hips.", category: "accessory", progressInc: 5 },
+      ]
+    },
+    friday: {
+      label: "FRI · Upper + Lower Burnout",
+      short: "FRI",
+      warmup: "upper",
+      exercises: [
+        { id: "fri_flat", name: "Flat DB Press", scheme: "RPT", sets: 3, reps: ["6-8","8-10","10-12"], rest: 90, note: "Anchor. Alternate with one-arm row. Stop 1-2 reps short of failure.", category: "compound", progressInc: 5, supersetWith: "fri1" },
+        { id: "fri1", name: "One-Arm DB Row", scheme: "RPT", sets: 2, reps: ["6-8/arm","8-10/arm"], rest: 90, note: "Anchor. Alternate with flat press. Heaviest pull of the week.", category: "compound", progressInc: 5, supersetWith: "fri_flat" },
+        { id: "fri_fly", name: "Cable Fly", scheme: "superset", supersetWith: "fri_facepull", sets: 2, reps: ["12-15","12-15"], rest: 60, note: "Pulley tower handles. DROP SET on the last set.", category: "isolation", progressInc: 2.5 },
+        { id: "fri_facepull", name: "Rope Face Pull", scheme: "superset", supersetWith: "fri_fly", sets: 2, reps: ["15","15"], rest: 60, note: "Pull to the forehead, elbows high.", category: "isolation", progressInc: 2.5 },
+        { id: "fri_ccurl", name: "Cable Curl", scheme: "superset", supersetWith: "fri_ohtri", sets: 2, reps: ["10-12","10-12"], rest: 60, note: "Straight bar on the low pulley.", category: "isolation", progressInc: 2.5 },
+        { id: "fri_ohtri", name: "Overhead Rope Triceps Extension", scheme: "superset", supersetWith: "fri_ccurl", sets: 2, reps: ["10-12","10-12"], rest: 60, note: "Face away from the tower. Deep stretch at the bottom.", category: "isolation", progressInc: 2.5 },
+        { id: "fri_fin_squat", name: "Burnout: Goblet Squat (45 lb KB)", scheme: "superset", supersetWith: "fri_fin_swing", sets: 3, reps: ["15","15","15"], rest: 0, note: "Straight into swings. 2-3 rounds, 30s between rounds.", category: "finisher", progressInc: 0 },
+        { id: "fri_fin_swing", name: "Burnout: Kettlebell Swing (45 lb)", scheme: "superset", supersetWith: "fri_fin_squat", sets: 3, reps: ["15","15","15"], rest: 30, note: "Hinge, snap the hips. Swap: sandbag reverse lunge x10/leg.", category: "finisher", progressInc: 0 },
+      ]
+    }
+  };
+}
+
+// ---------- LEGACY (pre-Nov 2026 program) — kept only so old session history still resolves ----------
+function legacyProgramForPhase(phase) {
   // Phase 1 and Phase 3 use the same exercise list (Phase 3 adds intensity tweaks via notes/tempo)
   const isP2 = phase === 2;
   const p3Tweak = phase === 3;
@@ -163,8 +212,8 @@ function programForPhase(phase) {
 // Deload week: take whichever phase you came from, drop volume.
 // Specifically: any exercise with 3 sets drops to 2, any with 2 sets drops to 1.
 // Top-set rep targets stay; intensity (load) target drops to RPE 6-7 (subjective in-app cue).
-function deloadProgram(basePhase) {
-  const base = programForPhase(basePhase);
+function deloadProgram(basePhase, source = programForPhase) {
+  const base = source(basePhase);
   const reduce = (ex) => {
     const newSetCount = ex.sets === 3 ? 2 : (ex.sets === 2 ? 1 : ex.sets);
     return {
@@ -194,15 +243,14 @@ function getProgramForWeek(week) {
 // Build a flat lookup of every exercise across all phases so history can resolve any ID.
 const ALL_EXERCISES = (() => {
   const all = {};
-  [1, 2, 3].forEach(p => {
-    const prog = programForPhase(p);
-    Object.values(prog).forEach(day => {
-      day.exercises.forEach(ex => { all[ex.id] = ex; });
-    });
-    // deload versions
-    const dl = deloadProgram(p);
-    Object.values(dl).forEach(day => {
-      day.exercises.forEach(ex => { all[ex.id] = ex; });
+  // legacy first, so the current program's definitions win where an ID is reused
+  [legacyProgramForPhase, programForPhase].forEach(source => {
+    [1, 2, 3].forEach(p => {
+      [source(p), deloadProgram(p, source)].forEach(prog => {
+        Object.values(prog).forEach(day => {
+          day.exercises.forEach(ex => { all[ex.id] = ex; });
+        });
+      });
     });
   });
   return all;
@@ -777,9 +825,8 @@ function Home({ PROGRAM, currentWeek, currentPhase, workouts, bodyweight, prs, a
         <div className="section-label">PROGRAM TARGETS</div>
         <div className="targets">
           <div className="target-row"><span>Goal weight</span><span className="t-val">195–205 lb</span></div>
-          <div className="target-row"><span>Protein floor</span><span className="t-val">180 g/day</span></div>
-          <div className="target-row"><span>Phase 1 (wk 1–4)</span><span className="t-val">2,100 cal</span></div>
-          <div className="target-row"><span>Phase 2 (wk 5–8)</span><span className="t-val">2,350 cal</span></div>
+          <div className="target-row"><span>Protein</span><span className="t-val">160–180 g/day</span></div>
+          <div className="target-row"><span>Calories (cut)</span><span className="t-val">1,650–1,700</span></div>
           <div className="target-row"><span>Step floor</span><span className="t-val">10,000/day</span></div>
         </div>
       </section>
